@@ -1,0 +1,31 @@
+# Compiled binaries
+*.exe
+*.o
+*.obj
+*.a
+*.lib
+*.dll
+
+# Logs and temporary files
+*.log
+compile_log_sdl.txt
+savegame.txt
+
+# Build systems
+build/
+CMakeFiles/
+CMakeCache.txt
+Makefile
+cmake_install.cmake
+
+# IDEs and Tools
+.vscode/
+.qodo/
+.idea/
+*.suo
+*.user
+*.sln
+
+# OS metadata
+Thumbs.db
+.DS_Store
