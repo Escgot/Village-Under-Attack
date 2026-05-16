@@ -21,15 +21,15 @@ public:
     int width;
     int height;
 
-    TownHall*                      townHall;
-    std::vector<Wall*>             walls;
-    std::vector<GoldMine*>         goldMines;
-    std::vector<ElixirCollector*>  elixirCollectors;
-    std::vector<Raider*>           raiders;
-    std::vector<Bomberman*>        bombermen;
-    Player*                        player;
-    std::vector<Barracks*>         barracks;
-    std::vector<Unit*>             defenders;
+    std::unique_ptr<TownHall>               townHall;
+    std::vector<std::unique_ptr<Wall>>      walls;
+    std::vector<std::unique_ptr<GoldMine>>  goldMines;
+    std::vector<std::unique_ptr<ElixirCollector>> elixirCollectors;
+    std::vector<std::unique_ptr<Raider>>    raiders;
+    std::vector<std::unique_ptr<Bomberman>> bombermen;
+    std::unique_ptr<Player>                 player;
+    std::vector<std::unique_ptr<Barracks>>  barracks;
+    std::vector<std::unique_ptr<Unit>>      defenders;
 
     int score;
     int tick;
@@ -58,6 +58,7 @@ public:
     bool upgradeBuilding(const Position& pos);
 
     void update();
+    void updateVisuals(float dt);
     void render() const;
 
     bool saveGame(const std::string& filename);

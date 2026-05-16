@@ -16,13 +16,13 @@ Bomberman::Bomberman(const Position& pos, const std::string& name)
 Building* Bomberman::findTargetWall(Board& board) {
     Building* target = nullptr;
     int bestDist = INT_MAX;
-    for (auto* w : board.walls) {
+    for (auto& w : board.walls) {
         if (!w->isAlive()) continue;
         int d = std::abs(w->position.x - position.x)
               + std::abs(w->position.y - position.y);
         if (d < bestDist) {
             bestDist = d;
-            target = w;
+            target = w.get();
         }
     }
     return target;

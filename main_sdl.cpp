@@ -12,10 +12,11 @@
 #include "Entities/Units/UnitType.h"
 #include "sdl_render.h"
 
+enum class State { MAIN_MENU, CREDITS, BACKGROUND_SELECT, INSTRUCTIONS, PLAYING, GAME_OVER };
+
 namespace {
 constexpr const char* kWindowTitlePlaying = "Village Under Attack - Premium";
-constexpr const char* kWindowTitleGameOver =
-    "GAME OVER — Appuyez sur [R] — Build: main_sdl.cpp " __DATE__;
+constexpr const char* kWindowTitleGameOver = "VILLAGE UNDER ATTACK — YOUR TOWN HALL HAS FALLEN";
 }
 
 static int g_loadedTextures = 0;
@@ -76,10 +77,20 @@ void loadSound(const char* relativePath, SoundEffect& s) {
 
 static SDL_AudioDeviceID g_audioDevice = 0;
 
-void playSound(const SoundEffect& s) {
+void playSoundPositional(const SoundEffect& s, const Position& source, const Position& player) {
     if (!s.buffer || g_audioDevice == 0) return;
+    
+    // Simple linear distance-based volume scaling
+    float dx = (float)(source.x - player.x);
+    float dy = (float)(source.y - player.y);
+    float dist = sqrtf(dx*dx + dy*dy);
+    float maxDist = 25.0f;
+    float volume = 1.0f - (dist / maxDist);
+    if (volume < 0.1f) return; // Too far
+    
     SDL_AudioStream* stream = SDL_CreateAudioStream(&s.spec, nullptr);
     if (stream) {
+        SDL_SetAudioStreamGain(stream, volume);
         SDL_BindAudioStream(g_audioDevice, stream);
         SDL_PutAudioStreamData(stream, s.buffer, s.length);
         SDL_FlushAudioStream(stream);
@@ -129,14 +140,14 @@ static void renderBackground(SDL_Renderer* r, const GameAssets& assets) {
     }
 }
 
-static void drawSprite(SDL_Renderer* r, SDL_Texture* tex, int gx, int gy, int szX, int szY, RGBA fallback, float bob = 0.0f) {
+static void drawSprite(SDL_Renderer* r, SDL_Texture* tex, float gx, float gy, int szX, int szY, RGBA fallback, float bob = 0.0f) {
     float ox = 0, oy = 0;
     if (g_shake >= 1.0f) {
         ox = (float)(rand() % (int)g_shake - (int)g_shake / 2);
         oy = (float)(rand() % (int)g_shake - (int)g_shake / 2);
     }
-    float x = cX(gx) - (szX/2.0f)*CELL + ox;
-    float y = cY(gy) - (szY/2.0f)*CELL + bob + oy;
+    float x = cX(0) + gx * CELL - (szX/2.0f)*CELL + ox;
+    float y = cY(0) + gy * CELL - (szY/2.0f)*CELL + bob + oy;
     float w = szX * CELL;
     float h = szY * CELL;
     if (tex) {
@@ -162,7 +173,7 @@ static void renderBoard(SDL_Renderer* ren, const Board& board, const GameAssets&
     for (int y = 0; y <= BOARD_H; y++) SDL_RenderLine(ren, MARGIN+ox, cY(y)+oy, MARGIN+BOARD_W*CELL+ox, cY(y)+oy);
 
     // TownHall
-    auto* th = board.townHall;
+    auto& th = board.townHall;
     if (th) {
         float pct = (float)th->health / (float)th->maxHealth;
         SDL_Texture* thTex = assets.t_townhall;
@@ -170,56 +181,56 @@ static void renderBoard(SDL_Renderer* ren, const Board& board, const GameAssets&
         else if (pct <= 0.4f) thTex = assets.t_townhall40;
         else if (pct <= 0.8f) thTex = assets.t_townhall80;
 
-        fGlow(ren, cX(th->position.x)+ox, cY(th->position.y)+oy, 35, {255, 200, 0, (Uint8)(50 + 30*sinf(time*3))});
+        fGlow(ren, cX(0) + th->visualX*CELL + ox, cY(0) + th->visualY*CELL + oy, 35, {255, 200, 0, (Uint8)(50 + 30*sinf(time*3))});
         
         // Level Tinting for TH
         if (th->level > 1) {
             SDL_SetTextureColorMod(thTex, 150, 200, 255);
         }
-        drawSprite(ren, thTex, th->position.x, th->position.y, th->sizeX, th->sizeY, {255, 210, 50, 180});
+        drawSprite(ren, thTex, th->visualX, th->visualY, th->sizeX, th->sizeY, {255, 210, 50, 180});
         if (th->level > 1) SDL_SetTextureColorMod(thTex, 255, 255, 255);
         
         if (th->health < th->maxHealth) {
-            hpBar(ren, cX(th->position.x - 2.5f) + ox, cY(th->position.y - 2.5f) - 15 + oy, 5 * CELL, 10, th->health, th->maxHealth);
+            hpBar(ren, cX(0) + (th->visualX - 2.5f)*CELL + ox, cY(0) + (th->visualY - 2.5f)*CELL - 15 + oy, 5 * CELL, 10, th->health, th->maxHealth);
         }
         
         // Draw Level Indicator
         char lvlBuf[16]; sprintf(lvlBuf, "LVL %d", th->level);
-        txt(ren, cX(th->position.x) - 15 + ox, cY(th->position.y) + 30 + oy, lvlBuf, {255, 200, 50, 255}, 1.2f);
+        txt(ren, cX(0) + th->visualX*CELL - 15 + ox, cY(0) + th->visualY*CELL + 30 + oy, lvlBuf, {255, 200, 50, 255}, 1.2f);
     }
 
     // Buildings
     bool animFrame = (SDL_GetTicks() % 1000) > 500;
     
-    for (auto* g : board.goldMines) {
+    for (auto& g : board.goldMines) {
         SDL_Texture* tex = (animFrame && assets.t_goldmine1) ? assets.t_goldmine1 : assets.t_goldmine;
-        drawSprite(ren, tex, g->position.x, g->position.y, g->sizeX, g->sizeY, {230, 180, 30, 180});
+        drawSprite(ren, tex, g->visualX, g->visualY, g->sizeX, g->sizeY, {230, 180, 30, 180});
         if (g->health < g->maxHealth) {
-            hpBar(ren, cX(g->position.x - g->sizeX/2.0f) + ox, cY(g->position.y - g->sizeY/2.0f) - 10 + oy, g->sizeX * CELL, 6, g->health, g->maxHealth);
+            hpBar(ren, cX(0) + (g->visualX - g->sizeX/2.0f)*CELL + ox, cY(0) + (g->visualY - g->sizeY/2.0f)*CELL - 10 + oy, g->sizeX * CELL, 6, g->health, g->maxHealth);
         }
     }
     
-    for (auto* e : board.elixirCollectors) {
+    for (auto& e : board.elixirCollectors) {
         SDL_Texture* tex = (animFrame && assets.t_elixir1) ? assets.t_elixir1 : assets.t_elixir;
-        drawSprite(ren, tex, e->position.x, e->position.y, e->sizeX, e->sizeY, {170, 50, 210, 180});
+        drawSprite(ren, tex, e->visualX, e->visualY, e->sizeX, e->sizeY, {170, 50, 210, 180});
         if (e->health < e->maxHealth) {
-            hpBar(ren, cX(e->position.x - e->sizeX/2.0f) + ox, cY(e->position.y - e->sizeY/2.0f) - 10 + oy, e->sizeX * CELL, 6, e->health, e->maxHealth);
+            hpBar(ren, cX(0) + (e->visualX - e->sizeX/2.0f)*CELL + ox, cY(0) + (e->visualY - e->sizeY/2.0f)*CELL - 10 + oy, e->sizeX * CELL, 6, e->health, e->maxHealth);
         }
     }
-    for (auto* b : board.barracks) {
+    for (auto& b : board.barracks) {
         SDL_Texture* bTex = (!b->trainQueue.empty()) ? assets.t_barracks_on : assets.t_barracks;
         if (b->level > 1) SDL_SetTextureColorMod(bTex, 255, 150, 255);
-        drawSprite(ren, bTex, b->position.x, b->position.y, b->sizeX, b->sizeY, {30, 180, 110, 180});
+        drawSprite(ren, bTex, b->visualX, b->visualY, b->sizeX, b->sizeY, {30, 180, 110, 180});
         if (b->level > 1) SDL_SetTextureColorMod(bTex, 255, 255, 255);
         
         if (b->health < b->maxHealth) {
-            hpBar(ren, cX(b->position.x - b->sizeX/2.0f) + ox, cY(b->position.y - b->sizeY/2.0f) - 10 + oy, b->sizeX * CELL, 6, b->health, b->maxHealth);
+            hpBar(ren, cX(0) + (b->visualX - b->sizeX/2.0f)*CELL + ox, cY(0) + (b->visualY - b->sizeY/2.0f)*CELL - 10 + oy, b->sizeX * CELL, 6, b->health, b->maxHealth);
         }
         char lvlBuf[16]; sprintf(lvlBuf, "LVL %d", b->level);
-        txt(ren, cX(b->position.x) - 15 + ox, cY(b->position.y) + 15 + oy, lvlBuf, {255, 150, 255, 255}, 0.8f);
+        txt(ren, cX(0) + b->visualX*CELL - 15 + ox, cY(0) + b->visualY*CELL + 15 + oy, lvlBuf, {255, 150, 255, 255}, 0.8f);
         if (!b->trainQueue.empty()) {
-            float bx = cX(b->position.x - b->sizeX/2.0f) + ox;
-            float by = cY(b->position.y - b->sizeY/2.0f) - 24 + oy;
+            float bx = cX(0) + (b->visualX - b->sizeX/2.0f)*CELL + ox;
+            float by = cY(0) + (b->visualY - b->sizeY/2.0f)*CELL - 24 + oy;
             hpBar(ren, bx, by, b->sizeX * CELL, 8, b->trainTimer, 60, true);
             char trainBuf[32];
             int ticksLeft = 60 - b->trainTimer; // TRAIN_INTERVAL is 60
@@ -228,18 +239,21 @@ static void renderBoard(SDL_Renderer* ren, const Board& board, const GameAssets&
             txt(ren, bx, by - 15, trainBuf, {100, 200, 255, 255});
         }
     }
-    for (auto* w : board.walls) {
-        drawSprite(ren, assets.t_wall, w->position.x, w->position.y, 1, 1, {160, 160, 170, 255});
+    for (auto& w : board.walls) {
+        drawSprite(ren, assets.t_wall, w->visualX, w->visualY, 1, 1, {160, 160, 170, 255});
         if (w->health < w->maxHealth) {
-            hpBar(ren, cX(w->position.x - 0.5f) + ox, cY(w->position.y - 0.5f) - 6 + oy, CELL, 4, w->health, w->maxHealth);
+            hpBar(ren, cX(0) + (w->visualX - 0.5f)*CELL + ox, cY(0) + (w->visualY - 0.5f)*CELL - 6 + oy, CELL, 4, w->health, w->maxHealth);
         }
     }
 
     // Entities
     auto drawEnt = [&](float gx, float gy, RGBA c, bool isHero = false, const char* name = nullptr, SDL_Texture* sprite = nullptr, int hp = 0, int mhp = 0, RGBA barColor = {100, 255, 100, 255}, RGBA tint = {255,255,255,255}) {
-        float ex = cX((int)gx) + ox;
-        float ey = cY((int)gy) + oy;
+        float ex = cX(0) + gx * CELL + ox;
+        float ey = cY(0) + gy * CELL + oy;
         
+        // Shadow
+        fCircle(ren, (int)(ex + CELL/2), (int)(ey + CELL - 4), 12, {0, 0, 0, 80});
+
         if (sprite) {
             SDL_SetTextureColorMod(sprite, tint.r, tint.g, tint.b);
             SDL_FRect dst = {ex, ey, CELL, CELL};
@@ -284,18 +298,19 @@ static void renderBoard(SDL_Renderer* ren, const Board& board, const GameAssets&
         }
     };
 
-    for (auto* u : board.defenders) {
+    for (auto& u : board.defenders) {
         if(!u->isAlive()) continue;
         SDL_Texture* tex = (u->type == UnitType::ARCHER || u->type == UnitType::MAGE) ? assets.t_archer : assets.t_barbarian;
         RGBA tint = (u->type == UnitType::MAGE) ? RGBA{200, 100, 255, 255} : C_WHITE;
         RGBA tagColor = (u->type == UnitType::ARCHER) ? C_ARCHER : ((u->type == UnitType::MAGE) ? RGBA{200, 100, 255, 255} : C_BARB);
-        drawEnt((float)u->position.x, (float)u->position.y, tagColor, false, u->name.c_str(), tex, u->health, u->maxHealth, C_HP_G, tint);
+        drawEnt(u->visualX, u->visualY, tagColor, false, u->name.c_str(), tex, u->health, u->maxHealth, C_HP_G, tint);
     }
-    for (auto* r : board.raiders) if(r->isAlive()) drawEnt((float)r->position.x, (float)r->position.y, C_RAIDER, false, r->name.c_str(), assets.t_raider, r->health, r->maxHealth, C_HP_R);
-    for (auto* bm : board.bombermen) if(bm->isAlive()) drawEnt((float)bm->position.x, (float)bm->position.y, C_BOMBER, false, bm->name.c_str(), assets.t_bomber, bm->health, bm->maxHealth, C_HP_R);
+    for (auto& r : board.raiders) if(r->isAlive()) drawEnt(r->visualX, r->visualY, C_RAIDER, false, r->name.c_str(), assets.t_raider, r->health, r->maxHealth, C_HP_R);
+    for (auto& bm : board.bombermen) if(bm->isAlive()) drawEnt(bm->visualX, bm->visualY, C_BOMBER, false, bm->name.c_str(), assets.t_bomber, bm->health, bm->maxHealth, C_HP_R);
 
     // Player (Now with a forced Name, Sprite, and UI tag)
-    drawEnt((float)board.player->position.x, (float)board.player->position.y, C_PLAYER, true, "THE COMMANDER", assets.t_barbarian, 0, 0, C_HP_G);
+    fGlow(ren, cX(0) + board.player->visualX*CELL + ox, cY(0) + board.player->visualY*CELL + oy, 20, {0, 100, 255, (Uint8)(40 + 20*sinf(time*4))});
+    drawEnt(board.player->visualX, board.player->visualY, C_PLAYER, true, "THE COMMANDER", assets.t_barbarian, 0, 0, C_HP_G);
 
     // VFX
     for(auto& p : g_parts) {
@@ -354,7 +369,7 @@ static void renderPanel(SDL_Renderer* ren, const Board& board) {
     // TRAINING QUEUE
     txt(ren, x, y, "TRAINING QUEUE", {255, 150, 255, 150}); y += 20;
     bool trainingAny = false;
-    for (auto* b : board.barracks) {
+    for (auto& b : board.barracks) {
         if (!b->trainQueue.empty()) {
             trainingAny = true;
             UnitType t = b->trainQueue.front();
@@ -376,7 +391,7 @@ static void renderPanel(SDL_Renderer* ren, const Board& board) {
     
     int displayed = 0;
     // Show only first 5 defenders to fit the panel
-    for (auto* u : board.defenders) {
+    for (auto& u : board.defenders) {
         if (!u->isAlive()) continue;
         if (displayed >= 5) break;
         
@@ -568,7 +583,10 @@ public:
         if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO)) return;
         
         audioDevice = SDL_OpenAudioDevice(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, NULL);
-        if (audioDevice != 0) SDL_ResumeAudioDevice(audioDevice);
+        if (audioDevice != 0) {
+            SDL_ResumeAudioDevice(audioDevice);
+            g_audioDevice = audioDevice; // Crucial: sync global handle
+        }
 
         win = SDL_CreateWindow(kWindowTitlePlaying, WIN_W, WIN_H, SDL_WINDOW_FULLSCREEN);
         ren = SDL_CreateRenderer(win, nullptr);
@@ -590,6 +608,8 @@ public:
             lastT = now;
 
             updateVFX(dt, assets.selectedBg);
+            if (board) board->updateVisuals(dt);
+            
             updateLogic(now, logicT);
             render();
         }
@@ -639,22 +659,22 @@ private:
                     if (sc == SDL_SCANCODE_C) {
                         board->collectResources();
                         if (board->player->resources.gold > oldG) {
-                            addFloatText(cX(board->player->position.x), cY(board->player->position.y), "+Gold", C_GOLD);
-                            playSound(assets.s_collect_gold);
+                            addFloatText(cX(0) + board->player->visualX*CELL, cY(0) + board->player->visualY*CELL, "+Gold", C_GOLD);
+                            playSoundPositional(assets.s_collect_gold, board->player->position, board->player->position);
                         }
                         if (board->player->resources.elixir > oldE) {
-                            addFloatText(cX(board->player->position.x), cY(board->player->position.y), "+Elixir", C_ELIX);
-                            playSound(assets.s_collect_elixir);
+                            addFloatText(cX(0) + board->player->visualX*CELL, cY(0) + board->player->visualY*CELL, "+Elixir", C_ELIX);
+                            playSoundPositional(assets.s_collect_elixir, board->player->position, board->player->position);
                         }
                     }
-                    if (sc == SDL_SCANCODE_G) { if(board->buildGoldMine(board->player->position)) playSound(assets.s_build); }
-                    if (sc == SDL_SCANCODE_E) { if(board->buildElixirCollector(board->player->position)) playSound(assets.s_build); }
-                    if (sc == SDL_SCANCODE_W) { if(board->buildWall(board->player->position)) playSound(assets.s_build); }
-                    if (sc == SDL_SCANCODE_B) { if(board->buildBarracks(board->player->position)) playSound(assets.s_build); }
-                    if (sc == SDL_SCANCODE_A) { if(board->trainInBarracks(UnitType::ARCHER)) playSound(assets.s_build); }
-                    if (sc == SDL_SCANCODE_H) { if(board->trainInBarracks(UnitType::BARBARIAN)) playSound(assets.s_build); }
-                    if (sc == SDL_SCANCODE_M) { if(board->trainInBarracks(UnitType::MAGE)) playSound(assets.s_build); }
-                    if (sc == SDL_SCANCODE_U) { if(board->upgradeBuilding(board->player->position)) playSound(assets.s_build); }
+                    if (sc == SDL_SCANCODE_G) { if(board->buildGoldMine(board->player->position)) playSoundPositional(assets.s_build, board->player->position, board->player->position); }
+                    if (sc == SDL_SCANCODE_E) { if(board->buildElixirCollector(board->player->position)) playSoundPositional(assets.s_build, board->player->position, board->player->position); }
+                    if (sc == SDL_SCANCODE_W) { if(board->buildWall(board->player->position)) playSoundPositional(assets.s_build, board->player->position, board->player->position); }
+                    if (sc == SDL_SCANCODE_B) { if(board->buildBarracks(board->player->position)) playSoundPositional(assets.s_build, board->player->position, board->player->position); }
+                    if (sc == SDL_SCANCODE_A) { if(board->trainInBarracks(UnitType::ARCHER)) playSoundPositional(assets.s_build, board->player->position, board->player->position); }
+                    if (sc == SDL_SCANCODE_H) { if(board->trainInBarracks(UnitType::BARBARIAN)) playSoundPositional(assets.s_build, board->player->position, board->player->position); }
+                    if (sc == SDL_SCANCODE_M) { if(board->trainInBarracks(UnitType::MAGE)) playSoundPositional(assets.s_build, board->player->position, board->player->position); }
+                    if (sc == SDL_SCANCODE_U) { if(board->upgradeBuilding(board->player->position)) playSoundPositional(assets.s_build, board->player->position, board->player->position); }
                     if (sc == SDL_SCANCODE_S) { board->saveGame("savegame.txt"); }
                     if (sc == SDL_SCANCODE_L) { board->loadGame("savegame.txt"); }
                 }
@@ -689,8 +709,8 @@ private:
                 if (board->townHall) {
                     if (board->townHall->health < oldTH) { 
                         g_shake = 10.0f; 
-                        spawnParts(cX(board->townHall->position.x), cY(board->townHall->position.y), C_HP_R); 
-                        playSound(assets.s_hit);
+                        spawnParts(cX(0) + board->townHall->visualX*CELL, cY(0) + board->townHall->visualY*CELL, C_HP_R); 
+                        playSoundPositional(assets.s_hit, board->townHall->position, board->player->position);
                     }
                 }
                 if (board->gameOver) {
@@ -729,9 +749,8 @@ private:
             // Impossible-to-miss banner: if you do not see this bar, you are not running this build.
             {
                 float bandY = WIN_H * 0.12f;
-                fR(ren, 0, bandY, (float)WIN_W, 52, {255, 220, 0, 235});
-                txt(ren, 120, bandY + 10, ">>> DEFAITE (nouvelle UI) — PANNEAU CENTRAL + TITRE DE FENETRE MAJ <<<",
-                    {30, 25, 10, 255}, 1.0f);
+                fR(ren, 0, bandY, (float)WIN_W, 52, {180, 20, 20, 200});
+                txt(ren, WIN_W/2 - 130, bandY + 12, "YOUR LEGACY ENDS HERE", {255, 255, 255, 255}, 1.2f);
             }
 
             float bw = 580, bh = 260;

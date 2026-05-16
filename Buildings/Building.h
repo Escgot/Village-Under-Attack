@@ -14,6 +14,7 @@ public:
     int health;
     int maxHealth;
     int level = 1;
+    float visualX, visualY;
 
     Building(int sizeX, int sizeY, const std::string& repr,
              int costGold, int costElixir, int maxInstances,
@@ -33,4 +34,5 @@ public:
 
     bool isAlive() const;
     void takeDamage(int dmg);
+    void updateVisuals(float dt);
 };

@@ -19,22 +19,22 @@ void Unit::update(Board& board) {
     int minDist = INT_MAX;
 
     // Cherche parmi les Raiders
-    for (Raider* r : board.raiders) {
+    for (auto& r : board.raiders) {
         if (!r->isAlive()) continue;
         int dist = std::abs(r->position.x - position.x) + std::abs(r->position.y - position.y);
         if (dist < minDist) {
             minDist = dist;
-            nearestEnemy = r;
+            nearestEnemy = r.get();
         }
     }
 
     // Cherche parmi les Bombermen
-    for (Bomberman* bm : board.bombermen) {
+    for (auto& bm : board.bombermen) {
         if (!bm->isAlive()) continue;
         int dist = std::abs(bm->position.x - position.x) + std::abs(bm->position.y - position.y);
         if (dist < minDist) {
             minDist = dist;
-            nearestEnemy = bm;
+            nearestEnemy = bm.get();
         }
     }
 

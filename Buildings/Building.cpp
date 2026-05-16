@@ -6,7 +6,15 @@ Building::Building(int sizeX, int sizeY, const std::string& repr,
     : sizeX(sizeX), sizeY(sizeY), repr(repr),
       costGold(costGold), costElixir(costElixir),
       maxInstances(maxInstances), position(pos),
-      health(health), maxHealth(health) {}
+      health(health), maxHealth(health),
+      visualX((float)pos.x), visualY((float)pos.y) {}
+
+
+void Building::updateVisuals(float dt) {
+    // Buildings are static, but we keep visualX/Y in sync for the renderer
+    visualX = (float)position.x;
+    visualY = (float)position.y;
+}
 
 bool Building::collidesWithPosition(const Position& pos) const {
     int halfX = sizeX / 2;

@@ -32,20 +32,12 @@ Board::Board(int width, int height)
       lastMessage("Bienvenue ! Deplacez-vous et construisez.")
 {
     std::srand(static_cast<unsigned>(std::time(nullptr)));
-    townHall = new TownHall(Position(width / 2, height / 2));
-    player   = new Player(Position(width / 2 + 5, height / 2 + 5));
+    townHall = std::make_unique<TownHall>(Position(width / 2, height / 2));
+    player   = std::make_unique<Player>(Position(width / 2 + 5, height / 2 + 5));
 }
 
 Board::~Board() {
-    delete townHall;
-    delete player;
-    for (auto* w : walls)            delete w;
-    for (auto* g : goldMines)        delete g;
-    for (auto* e : elixirCollectors) delete e;
-    for (auto* r : raiders)          delete r;
-    for (auto* b : barracks)         delete b;
-    for (auto* u : defenders)        delete u;
-    for (auto* bm : bombermen)       delete bm;
+    // Smart pointers handle deletion automatically
 }
 
 bool Board::isPositionFree(const Position& pos, int sizeX, int sizeY, Building* ignore) const {
@@ -59,11 +51,11 @@ bool Board::isPositionFree(const Position& pos, int sizeX, int sizeY, Building* 
         int oMinY = b->position.y - oHalfY, oMaxY = b->position.y + oHalfY;
         return !(maxX < oMinX || oMaxX < minX || maxY < oMinY || oMaxY < minY);
     };
-    if (overlaps(townHall)) return false;
-    for (auto* w : walls)            if (overlaps(w)) return false;
-    for (auto* g : goldMines)        if (overlaps(g)) return false;
-    for (auto* e : elixirCollectors) if (overlaps(e)) return false;
-    for (auto* b : barracks)         if (overlaps(b)) return false;
+    if (overlaps(townHall.get())) return false;
+    for (auto& w : walls)            if (overlaps(w.get())) return false;
+    for (auto& g : goldMines)        if (overlaps(g.get())) return false;
+    for (auto& e : elixirCollectors) if (overlaps(e.get())) return false;
+    for (auto& b : barracks)         if (overlaps(b.get())) return false;
     int halfX = sizeX / 2, halfY = sizeY / 2;
     if (pos.x - halfX < 0 || pos.x + halfX >= width)  return false;
     if (pos.y - halfY < 0 || pos.y + halfY >= height) return false;
@@ -80,7 +72,7 @@ bool Board::buildWall(const Position& pos) {
     if (!isPositionFree(pos, 1, 1)) {
         lastMessage = "ERREUR: Position occupee ou hors limites !"; return false;
     }
-    walls.push_back(new Wall(pos));
+    walls.push_back(std::make_unique<Wall>(pos));
     player->resources.consume(Wall::STATIC_COST_GOLD, Wall::STATIC_COST_ELIXIR);
     score += 10;
     lastMessage = "OK: Mur construit ! (-10 or, +10 score)";
@@ -97,7 +89,7 @@ bool Board::buildGoldMine(const Position& pos) {
     if (!isPositionFree(pos, 3, 3)) {
         lastMessage = "ERREUR: Position occupee ! Eloignez-vous du TownHall."; return false;
     }
-    goldMines.push_back(new GoldMine(pos));
+    goldMines.push_back(std::make_unique<GoldMine>(pos));
     player->resources.consume(GoldMine::STATIC_COST_GOLD, GoldMine::STATIC_COST_ELIXIR);
     score += 10;
     lastMessage = "OK: GoldMine construite ! (-100 elixir, +10 score)";
@@ -114,7 +106,7 @@ bool Board::buildElixirCollector(const Position& pos) {
     if (!isPositionFree(pos, 3, 3)) {
         lastMessage = "ERREUR: Position occupee ! Eloignez-vous du TownHall."; return false;
     }
-    elixirCollectors.push_back(new ElixirCollector(pos));
+    elixirCollectors.push_back(std::make_unique<ElixirCollector>(pos));
     player->resources.consume(ElixirCollector::STATIC_COST_GOLD, ElixirCollector::STATIC_COST_ELIXIR);
     score += 10;
     lastMessage = "OK: ElixirCollector construit ! (-100 or, +10 score)";
@@ -131,7 +123,7 @@ bool Board::buildBarracks(const Position& pos) {
     if (!isPositionFree(pos, 3, 3)) {
         lastMessage = "ERREUR: Position occupee !"; return false;
     }
-    barracks.push_back(new Barracks(pos));
+    barracks.push_back(std::make_unique<Barracks>(pos));
     player->resources.consume(Barracks::STATIC_COST_GOLD, Barracks::STATIC_COST_ELIXIR);
     score += 20;
     lastMessage = "OK: Caserne construite ! [A]=Archer(50 elixir) [H]=Barbare(30 elixir)";
@@ -142,9 +134,9 @@ bool Board::buildBarracks(const Position& pos) {
 bool Board::trainInBarracks(UnitType type) {
     // Find a barracks the player is standing on
     Barracks* target = nullptr;
-    for (auto* b : barracks) {
+    for (auto& b : barracks) {
         if (b->collidesWithPosition(player->position)) {
-            target = b;
+            target = b.get();
             break;
         }
     }
@@ -179,7 +171,7 @@ bool Board::trainInBarracks(UnitType type) {
 
 void Board::collectResources() {
     bool collected = false;
-    for (auto* g : goldMines) {
+    for (auto& g : goldMines) {
         if (g->collidesWithPosition(player->position)) {
             int amt = g->collect();
             if (amt > 0) {
@@ -193,7 +185,7 @@ void Board::collectResources() {
             }
         }
     }
-    for (auto* e : elixirCollectors) {
+    for (auto& e : elixirCollectors) {
         if (e->collidesWithPosition(player->position)) {
             int amt = e->collect();
             if (amt > 0) {
@@ -226,13 +218,25 @@ bool Board::upgradeBuilding(const Position& pos) {
         return false;
     };
 
-    if (tryUpgrade(townHall)) return true;
-    for (auto* b : barracks) if (tryUpgrade(b)) return true;
-    for (auto* g : goldMines) if (tryUpgrade(g)) return true;
-    for (auto* e : elixirCollectors) if (tryUpgrade(e)) return true;
+    if (tryUpgrade(townHall.get())) return true;
+    for (auto& b : barracks) if (tryUpgrade(b.get())) return true;
+    for (auto& g : goldMines) if (tryUpgrade(g.get())) return true;
+    for (auto& e : elixirCollectors) if (tryUpgrade(e.get())) return true;
     
     lastMessage = "INFO: Aucun batiment ameliorable ici.";
     return false;
+}
+
+void Board::updateVisuals(float dt) {
+    if (player) player->updateVisuals(dt);
+    if (townHall) townHall->updateVisuals(dt);
+    for (auto& w : walls) w->updateVisuals(dt);
+    for (auto& g : goldMines) g->updateVisuals(dt);
+    for (auto& e : elixirCollectors) e->updateVisuals(dt);
+    for (auto& b : barracks) b->updateVisuals(dt);
+    for (auto& r : raiders) r->updateVisuals(dt);
+    for (auto& bm : bombermen) bm->updateVisuals(dt);
+    for (auto& d : defenders) d->updateVisuals(dt);
 }
 
 void Board::update() {
@@ -255,15 +259,15 @@ void Board::update() {
 }
 
 void Board::cleanDeadBuildings() {
-    walls.erase(std::remove_if(walls.begin(), walls.end(), [](Wall* w){ if(!w->isAlive()){ delete w; return true; } return false; }), walls.end());
-    goldMines.erase(std::remove_if(goldMines.begin(), goldMines.end(), [](GoldMine* g){ if(!g->isAlive()){ delete g; return true; } return false; }), goldMines.end());
-    elixirCollectors.erase(std::remove_if(elixirCollectors.begin(), elixirCollectors.end(), [](ElixirCollector* e){ if(!e->isAlive()){ delete e; return true; } return false; }), elixirCollectors.end());
-    barracks.erase(std::remove_if(barracks.begin(), barracks.end(), [](Barracks* b){ if(!b->isAlive()){ delete b; return true; } return false; }), barracks.end());
+    walls.erase(std::remove_if(walls.begin(), walls.end(), [](auto& w){ return !w->isAlive(); }), walls.end());
+    goldMines.erase(std::remove_if(goldMines.begin(), goldMines.end(), [](auto& g){ return !g->isAlive(); }), goldMines.end());
+    elixirCollectors.erase(std::remove_if(elixirCollectors.begin(), elixirCollectors.end(), [](auto& e){ return !e->isAlive(); }), elixirCollectors.end());
+    barracks.erase(std::remove_if(barracks.begin(), barracks.end(), [](auto& b){ return !b->isAlive(); }), barracks.end());
 }
 
 void Board::generateResources() {
-    for (auto* g : goldMines)        g->generate(5);
-    for (auto* e : elixirCollectors) e->generate(5);
+    for (auto& g : goldMines)        g->generate(5);
+    for (auto& e : elixirCollectors) e->generate(5);
 }
 
 void Board::spawnRaider() {
@@ -277,7 +281,7 @@ void Board::spawnRaider() {
         default: spawnPos = {width - 1, std::rand() % height}; break;
     }
     std::string name = names[std::rand() % names.size()];
-    raiders.push_back(new Raider(spawnPos, name));
+    raiders.push_back(std::make_unique<Raider>(spawnPos, name));
 }
 
 void Board::spawnBomberman() {
@@ -291,23 +295,26 @@ void Board::spawnBomberman() {
         default: spawnPos = {width - 1, std::rand() % height}; break;
     }
     std::string name = names[std::rand() % names.size()];
-    bombermen.push_back(new Bomberman(spawnPos, name));
+    bombermen.push_back(std::make_unique<Bomberman>(spawnPos, name));
     lastMessage = "ALERTE: " + name + " est apparu ! Il detruit les murs !";
 }
 
 void Board::updateEnemies() {
     // Raiders: Reactive AI
-    for (auto* r : raiders) {
+    for (auto& r : raiders) {
         if (!r->isAlive()) continue;
         r->attackCooldown = std::max(0, r->attackCooldown - 1);
 
         // React to Defenders first
         Unit* closestDef = nullptr;
         int defDist = INT_MAX;
-        for (auto* u : defenders) {
+        for (auto& u : defenders) {
             if (!u->isAlive()) continue;
-            int d = std::abs(u->position.x - r->position.x) + std::abs(u->position.y - r->position.y);
-            if (d < defDist) { defDist = d; closestDef = u; }
+            // Chebyshev distance for 8-direction adjacency
+            int dx = std::abs(u->position.x - r->position.x);
+            int dy = std::abs(u->position.y - r->position.y);
+            int d = std::max(dx, dy);
+            if (d < defDist) { defDist = d; closestDef = u.get(); }
         }
 
         if (closestDef && defDist <= 4) { // Aggro range for defenders
@@ -322,23 +329,26 @@ void Board::updateEnemies() {
             }
         } else {
             // Target nearest building
-            Building* target = townHall;
-            int bDist = std::abs(townHall->position.x - r->position.x) + std::abs(townHall->position.y - r->position.y);
+            Building* target = townHall.get();
+            int bDist = std::max(std::abs(townHall->position.x - r->position.x), std::abs(townHall->position.y - r->position.y));
             
-            for (auto* m : goldMines) {
-                int d = std::abs(m->position.x - r->position.x) + std::abs(m->position.y - r->position.y);
-                if (d < bDist) { bDist = d; target = m; }
+            for (auto& m : goldMines) {
+                int d = std::max(std::abs(m->position.x - r->position.x), std::abs(m->position.y - r->position.y));
+                if (d < bDist) { bDist = d; target = m.get(); }
             }
-            for (auto* e : elixirCollectors) {
-                int d = std::abs(e->position.x - r->position.x) + std::abs(e->position.y - r->position.y);
-                if (d < bDist) { bDist = d; target = e; }
+            for (auto& e : elixirCollectors) {
+                int d = std::max(std::abs(e->position.x - r->position.x), std::abs(e->position.y - r->position.y));
+                if (d < bDist) { bDist = d; target = e.get(); }
             }
 
-            if (bDist <= 1 || target->collidesWithPosition(r->position)) {
+            if (bDist <= (target->sizeX / 2 + 1) || target->collidesWithPosition(r->position)) {
                 if (r->attackCooldown == 0) {
                     int dmg = 3; // Mines/Collectors
-                    if (target == townHall) dmg = 5;
-                    else if (std::find(walls.begin(), walls.end(), target) != walls.end()) dmg = 1;
+                    if (target == townHall.get()) dmg = 5;
+                    else {
+                        // Check if it's a wall
+                        for(auto& w : walls) if(w.get() == target) { dmg = 1; break; }
+                    }
                     target->takeDamage(dmg);
                     r->attackCooldown = r->attackCooldownMax;
                 }
@@ -349,17 +359,17 @@ void Board::updateEnemies() {
     }
 
     // Bomberman: Priority Walls, then Reactive
-    for (auto* bm : bombermen) {
+    for (auto& bm : bombermen) {
         if (!bm->isAlive()) continue;
         bm->attackCooldown = std::max(0, bm->attackCooldown - 1);
 
         // Check if engaged by defender
         Unit* closestDef = nullptr;
         int defDist = INT_MAX;
-        for (auto* u : defenders) {
+        for (auto& u : defenders) {
             if (!u->isAlive()) continue;
-            int d = std::abs(u->position.x - bm->position.x) + std::abs(u->position.y - bm->position.y);
-            if (d < defDist) { defDist = d; closestDef = u; }
+            int d = std::max(std::abs(u->position.x - bm->position.x), std::abs(u->position.y - bm->position.y));
+            if (d < defDist) { defDist = d; closestDef = u.get(); }
         }
 
         if (closestDef && defDist <= 1) { // Engaged
@@ -370,14 +380,19 @@ void Board::updateEnemies() {
         } else {
             Building* target = nullptr;
             if (!walls.empty()) target = bm->findTargetWall(*this);
-            if (!target) target = townHall; // Fallback to TownHall
+            if (!target) target = townHall.get(); // Fallback to TownHall
 
-            int dist = std::abs(target->position.x - bm->position.x) + std::abs(target->position.y - bm->position.y);
-            if (dist <= 1 || target->collidesWithPosition(bm->position)) {
+            int dist = std::max(std::abs(target->position.x - bm->position.x), std::abs(target->position.y - bm->position.y));
+            if (dist <= (target->sizeX / 2 + 1) || target->collidesWithPosition(bm->position)) {
                 if (bm->attackCooldown == 0) {
                     int dmg = 1;
-                    if (target == townHall) dmg = 2;
-                    else if (std::find(walls.begin(), walls.end(), target) != walls.end()) dmg = 50;
+                    if (target == townHall.get()) dmg = 10;
+                    else {
+                        // Check if it's a wall
+                        bool isWall = false;
+                        for(auto& w : walls) if(w.get() == target) { isWall = true; break; }
+                        if (isWall) dmg = 50; 
+                    }
                     target->takeDamage(dmg);
                     bm->attackCooldown = bm->attackCooldownMax;
                 }
@@ -388,16 +403,16 @@ void Board::updateEnemies() {
     }
 
     // Cleanup
-    raiders.erase(std::remove_if(raiders.begin(), raiders.end(), [](Raider* r){ if(!r->isAlive()){ delete r; return true; } return false; }), raiders.end());
-    bombermen.erase(std::remove_if(bombermen.begin(), bombermen.end(), [](Bomberman* bm){ if(!bm->isAlive()){ delete bm; return true; } return false; }), bombermen.end());
+    raiders.erase(std::remove_if(raiders.begin(), raiders.end(), [](auto& r){ return !r->isAlive(); }), raiders.end());
+    bombermen.erase(std::remove_if(bombermen.begin(), bombermen.end(), [](auto& bm){ return !bm->isAlive(); }), bombermen.end());
 }
 
 void Board::cleanDeadDefenders() {
-    defenders.erase(std::remove_if(defenders.begin(), defenders.end(), [](Unit* u){ if(!u->isAlive()){ delete u; return true; } return false; }), defenders.end());
+    defenders.erase(std::remove_if(defenders.begin(), defenders.end(), [](auto& u){ return !u->isAlive(); }), defenders.end());
 }
 
 void Board::updateDefenders() {
-    for (auto* u : defenders) {
+    for (auto& u : defenders) {
         if (!u->isAlive()) continue;
         u->attackCooldown = std::max(0, u->attackCooldown - 1);
         u->moveCooldown = std::max(0, u->moveCooldown - 1);
@@ -412,8 +427,8 @@ void Board::updateDefenders() {
             int d = std::abs(e->position.x - u->position.x) + std::abs(e->position.y - u->position.y);
             if (d < tDist) { tDist = d; target = e; }
         };
-        for (auto* r : raiders) checkEnemy(r);
-        for (auto* bm : bombermen) checkEnemy(bm);
+        for (auto& r : raiders) checkEnemy(r.get());
+        for (auto& bm : bombermen) checkEnemy(bm.get());
 
         if (target && tDist <= range) {
             if (u->attackCooldown == 0) {
@@ -442,12 +457,12 @@ void Board::updateBarracks() {
     static const std::vector<std::string> barbNames = {"Magnus", "Throg", "Grog", "Conan", "Guts", "Bjorn", "Ragnar", "Ulf"};
     static const std::vector<std::string> mageNames = {"Gandalf", "Merlin", "Jaina", "Medivh", "Khadgar", "Geralt", "Yennefer", "Triss"};
 
-    for (auto* b : barracks) {
+    for (auto& b : barracks) {
         if (!b->trainQueue.empty()) {
             b->trainTimer++;
             if (b->trainTimer >= Barracks::TRAIN_INTERVAL) {
                 UnitType type = b->trainQueue.front();
-                Unit* u = nullptr;
+                std::unique_ptr<Unit> u;
                 Position spawnPos = b->position;
                 spawnPos.x += (std::rand() % 3) - 1;
                 spawnPos.y += (std::rand() % 3) - 1;
@@ -457,17 +472,17 @@ void Board::updateBarracks() {
                 std::string uName;
                 if (type == UnitType::ARCHER) {
                     uName = archerNames[std::rand() % archerNames.size()];
-                    u = new Archer(spawnPos, uName);
+                    u = std::make_unique<Archer>(spawnPos, uName);
                 } else if (type == UnitType::MAGE) {
                     uName = mageNames[std::rand() % mageNames.size()];
-                    u = new Mage(spawnPos, uName);
+                    u = std::make_unique<Mage>(spawnPos, uName);
                 } else {
                     uName = barbNames[std::rand() % barbNames.size()];
-                    u = new Barbarian(spawnPos, uName);
+                    u = std::make_unique<Barbarian>(spawnPos, uName);
                 }
 
                 if (u) {
-                    defenders.push_back(u);
+                    defenders.push_back(std::move(u));
                     b->trainQueue.pop();
                     b->trainTimer = 0;
                     lastMessage = "OK: " + uName + " pret au combat !";
@@ -503,33 +518,33 @@ std::string Board::getCellContent(int x, int y) const {
         return player->getRepr(); // emoji -> 2 wide OK
 
     // Enemies
-    for (auto* r : raiders)
+    for (auto& r : raiders)
         if (r->position == pos)  return r->getRepr();
-    for (auto* bm : bombermen)
+    for (auto& bm : bombermen)
         if (bm->position == pos) return bm->getRepr();
 
     // Defenders (Archer 'A', Barbarian 'B' are single chars -> padded in render)
-    for (auto* u : defenders)
+    for (auto& u : defenders)
         if (u->position == pos)  return u->getRepr();
 
     // Buildings (centres)
     if (townHall->position == pos) return townHall->getRepr();
-    for (auto* g : goldMines)
+    for (auto& g : goldMines)
         if (g->position == pos)    return g->getRepr();
-    for (auto* e : elixirCollectors)
+    for (auto& e : elixirCollectors)
         if (e->position == pos)    return e->getRepr();
-    for (auto* b : barracks)
+    for (auto& b : barracks)
         if (b->position == pos)    return b->getRepr(); // now emoji 🏚
-    for (auto* w : walls)
+    for (auto& w : walls)
         if (w->position == pos)    return w->getRepr();
 
     // Building body tiles (non-centre occupied cells)
     if (townHall->collidesWithPosition(pos))           return "\033[48;5;236m \033[0m ";
-    for (auto* g : goldMines)
+    for (auto& g : goldMines)
         if (g->collidesWithPosition(pos))              return "\033[48;5;236m \033[0m ";
-    for (auto* e : elixirCollectors)
+    for (auto& e : elixirCollectors)
         if (e->collidesWithPosition(pos))              return "\033[48;5;236m \033[0m ";
-    for (auto* b : barracks)
+    for (auto& b : barracks)
         if (b->collidesWithPosition(pos))              return "\033[48;5;236m \033[0m ";
 
     return ""; // empty cell
@@ -542,7 +557,7 @@ std::string Board::getPanelLine(int lineIndex) const {
     int totalQueued = 0;
     int trainingProgress = 0;
     bool anyTraining = false;
-    for (auto* b : barracks) {
+    for (auto& b : barracks) {
         totalQueued += (int)b->trainQueue.size();
         if (!b->trainQueue.empty()) {
             anyTraining = true;
@@ -617,20 +632,20 @@ bool Board::saveGame(const std::string& filename) {
         << townHall->health << " " << townHall->level << "\n";
 
     // Buildings
-    for (auto* w : walls) ofs << "WALL " << w->position.x << " " << w->position.y << " " << w->health << "\n";
-    for (auto* g : goldMines) ofs << "GOLDMINE " << g->position.x << " " << g->position.y << " " << g->health << " " << g->level << "\n";
-    for (auto* e : elixirCollectors) ofs << "ELIXIR " << e->position.x << " " << e->position.y << " " << e->health << " " << e->level << "\n";
-    for (auto* b : barracks) ofs << "BARRACKS " << b->position.x << " " << b->position.y << " " << b->health << " " << b->level << "\n";
+    for (auto& w : walls) ofs << "WALL " << w->position.x << " " << w->position.y << " " << w->health << "\n";
+    for (auto& g : goldMines) ofs << "GOLDMINE " << g->position.x << " " << g->position.y << " " << g->health << " " << g->level << "\n";
+    for (auto& e : elixirCollectors) ofs << "ELIXIR " << e->position.x << " " << e->position.y << " " << e->health << " " << e->level << "\n";
+    for (auto& b : barracks) ofs << "BARRACKS " << b->position.x << " " << b->position.y << " " << b->health << " " << b->level << "\n";
 
     // Units
-    for (auto* u : defenders) {
+    for (auto& u : defenders) {
         std::string type = "BARBARIAN";
         if (u->type == UnitType::ARCHER) type = "ARCHER";
         else if (u->type == UnitType::MAGE) type = "MAGE";
         ofs << "DEFENDER " << type << " " << u->position.x << " " << u->position.y << " " << u->health << " " << u->name << "\n";
     }
-    for (auto* r : raiders) ofs << "RAIDER " << r->position.x << " " << r->position.y << " " << r->health << " " << r->name << "\n";
-    for (auto* bm : bombermen) ofs << "BOMBERMAN " << bm->position.x << " " << bm->position.y << " " << bm->health << " " << bm->name << "\n";
+    for (auto& r : raiders) ofs << "RAIDER " << r->position.x << " " << r->position.y << " " << r->health << " " << r->name << "\n";
+    for (auto& bm : bombermen) ofs << "BOMBERMAN " << bm->position.x << " " << bm->position.y << " " << bm->health << " " << bm->name << "\n";
 
     lastMessage = "OK: Partie sauvgardee dans " + filename;
     return true;
@@ -643,14 +658,14 @@ bool Board::loadGame(const std::string& filename) {
         return false;
     }
 
-    // Clear current state
-    for (auto* w : walls) delete w;            walls.clear();
-    for (auto* g : goldMines) delete g;        goldMines.clear();
-    for (auto* e : elixirCollectors) delete e; elixirCollectors.clear();
-    for (auto* b : barracks) delete b;         barracks.clear();
-    for (auto* r : raiders) delete r;          raiders.clear();
-    for (auto* bm : bombermen) delete bm;       bombermen.clear();
-    for (auto* u : defenders) delete u;        defenders.clear();
+    // Clear current state - unique_ptr handles this
+    walls.clear();
+    goldMines.clear();
+    elixirCollectors.clear();
+    barracks.clear();
+    raiders.clear();
+    bombermen.clear();
+    defenders.clear();
 
     std::string line;
     while (std::getline(ifs, line)) {
@@ -669,41 +684,41 @@ bool Board::loadGame(const std::string& filename) {
         } else if (tag == "WALL") {
             Position p; int hp;
             ss >> p.x >> p.y >> hp;
-            auto* w = new Wall(p); w->health = hp;
-            walls.push_back(w);
+            auto w = std::make_unique<Wall>(p); w->health = hp;
+            walls.push_back(std::move(w));
         } else if (tag == "GOLDMINE") {
             Position p; int hp, lvl;
             ss >> p.x >> p.y >> hp >> lvl;
-            auto* g = new GoldMine(p); g->health = hp; g->level = lvl;
-            goldMines.push_back(g);
+            auto g = std::make_unique<GoldMine>(p); g->health = hp; g->level = lvl;
+            goldMines.push_back(std::move(g));
         } else if (tag == "ELIXIR") {
             Position p; int hp, lvl;
             ss >> p.x >> p.y >> hp >> lvl;
-            auto* e = new ElixirCollector(p); e->health = hp; e->level = lvl;
-            elixirCollectors.push_back(e);
+            auto e = std::make_unique<ElixirCollector>(p); e->health = hp; e->level = lvl;
+            elixirCollectors.push_back(std::move(e));
         } else if (tag == "BARRACKS") {
             Position p; int hp, lvl;
             ss >> p.x >> p.y >> hp >> lvl;
-            auto* b = new Barracks(p); b->health = hp; b->level = lvl;
-            barracks.push_back(b);
+            auto b = std::make_unique<Barracks>(p); b->health = hp; b->level = lvl;
+            barracks.push_back(std::move(b));
         } else if (tag == "DEFENDER") {
             std::string type, name; Position p; int hp;
             ss >> type >> p.x >> p.y >> hp >> name;
-            Unit* u = nullptr;
-            if (type == "ARCHER") u = new Archer(p, name);
-            else if (type == "MAGE") u = new Mage(p, name);
-            else u = new Barbarian(p, name);
-            if (u) { u->health = hp; defenders.push_back(u); }
+            std::unique_ptr<Unit> u;
+            if (type == "ARCHER") u = std::make_unique<Archer>(p, name);
+            else if (type == "MAGE") u = std::make_unique<Mage>(p, name);
+            else u = std::make_unique<Barbarian>(p, name);
+            if (u) { u->health = hp; defenders.push_back(std::move(u)); }
         } else if (tag == "RAIDER") {
             Position p; int hp; std::string name;
             ss >> p.x >> p.y >> hp >> name;
-            auto* r = new Raider(p, name); r->health = hp;
-            raiders.push_back(r);
+            auto r = std::make_unique<Raider>(p, name); r->health = hp;
+            raiders.push_back(std::move(r));
         } else if (tag == "BOMBERMAN") {
             Position p; int hp; std::string name;
             ss >> p.x >> p.y >> hp >> name;
-            auto* bm = new Bomberman(p, name); bm->health = hp;
-            bombermen.push_back(bm);
+            auto bm = std::make_unique<Bomberman>(p, name); bm->health = hp;
+            bombermen.push_back(std::move(bm));
         }
     }
 
